@@ -1,0 +1,303 @@
+package Tooltip
+import LinkedList
+import HashMap
+import StringUtils
+import AbilityObjEditing
+import ItemObjEditing
+
+@configurable constant TOOLTIP_DEFAULT_TEMPLATE = "{field}:\n    {value}"
+@configurable constant TOOLTIP_DEFAULT_BASIC_TEMPLATE = "{hotkey} {action} {name} {lvl}"
+@configurable constant TOOLTIP_DEFAULT_STYLE = new TooltipStyle
+	..put("action", "{action}")
+	..put("name", "{name}")
+	..put("hotkey", "[{hotkey}]")
+	..put("lvl", "[Level {lvl}]")
+	..put("field", "|{field}|")
+	..put("value", "{value}")
+	..put("value[Sep]", ", ")
+	..put("value[LvlSep]", "/")
+	..put("value[Emphasize]", "<{value}>")
+	..put("value[Deemphasize]", "{value}")
+
+public class TooltipStyle extends IterableMap<string, string>
+	function getSeparator(string name, bool forLvl) returns string
+		string retVal
+		if not forLvl
+			retVal = get(name + "[Sep]")
+		else
+			retVal = get(name + "[LvlSep]")
+		return retVal
+
+	function getEmphasize(string name, bool doEmphasize) returns string
+		string retVal
+		if doEmphasize
+			retVal = get(name + "[Emphasize]")
+		else
+			retVal = get(name + "[Deemphasize]")
+		return retVal
+
+	construct()
+
+	construct(thistype proto)
+		addAll(proto)
+
+class FieldValue
+	protected string name
+	protected string value = ""
+	protected LinkedList<string> listValue = null
+	protected bool lvlDependant = false
+
+	function get(TooltipStyle style, int lvl) returns string
+		let separator = style.getSeparator(name, lvlDependant)
+		var retVal = value
+		if retVal == "" and listValue != null
+			if lvlDependant
+				for i=0 to listValue.size() - 1
+					if i != 0
+						retVal += separator
+					retVal += style.getEmphasize(name, i == lvl - 1).replace("{" + name + "}", listValue.get(i))
+			else
+				retVal = listValue.joinBy(separator)
+		return retVal
+
+	function get(string separator) returns string
+		var retVal = value
+		if retVal == "" and listValue != null
+			retVal = listValue.joinBy(separator)
+		return retVal
+
+	construct(string name, string value)
+		this.name = name
+		this.value = value
+
+	construct(string name, LinkedList<string> listValue, bool lvlDependant)
+		this.name = name
+		this.listValue = listValue
+		this.lvlDependant = lvlDependant
+
+	construct(LinkedList<string> listValue)
+		this.listValue = listValue
+
+	ondestroy 
+		if listValue != null
+			destroy listValue
+
+class TooltipSegment
+	protected static constant NULL = new TooltipSegment(Tooltip.NULL)
+	protected Tooltip parent
+	protected string template
+	protected TooltipStyle style
+	protected IterableMap<string, FieldValue> fields
+
+	function setTemplate(string val)
+		template = val
+
+	function setStyle(TooltipStyle val)
+		style = val
+
+	function addField(string name, string value)
+		if value != ""
+			fields.put(name, new FieldValue(name, value))
+
+	function addField(string name, LinkedList<string> values)
+		if not values.isEmpty()
+			fields.put(name, new FieldValue(values))
+
+	function addField(string name, LinkedList<string> values, bool lvlDependant)
+		if not values.isEmpty()
+			fields.put(name, new FieldValue(name, values, lvlDependant))
+
+	function render(int lvl) returns string
+		var rendered = template
+		if parent.lvls > 1
+			addField("lvl", lvl.toString())
+		for field in fields
+			let fieldStyle = style.get(field)
+			string replaceWith = fields.get(field).get(style, lvl)
+			if fieldStyle != ""
+				replaceWith = fieldStyle.replace("{" + field + "}", replaceWith)
+			rendered = rendered.replace("{" + field + "}", replaceWith)
+		return rendered.cleanTemplate()
+
+	construct(Tooltip parent)
+		this.parent = parent
+		this.template = parent.template
+		this.style = parent.style
+		this.fields = new IterableMap<string, FieldValue>
+
+	ondestroy
+		for field in fields
+			destroy fields.get(field)
+		destroy fields
+
+public class Tooltip
+	protected static constant NULL = new Tooltip()
+	protected int lvls
+	protected var style = TOOLTIP_DEFAULT_STYLE
+	protected var template = TOOLTIP_DEFAULT_TEMPLATE
+
+	protected constant basicSegment = new TooltipSegment(this)..setTemplate(TOOLTIP_DEFAULT_BASIC_TEMPLATE)
+	protected constant segments = new LinkedList<TooltipSegment>
+	
+	function setStyle(TooltipStyle val)
+		style = val
+
+	function setTemplate(string val)
+		template = val
+
+	construct()
+		this.lvls = 0
+
+	construct(int lvls)
+		this.lvls = lvls
+
+	function setLevels(int lvls)
+		this.lvls = lvls
+
+	ondestroy
+		destroy basicSegment
+		for segment in segments
+			destroy segment
+		destroy segments
+
+	function getBasicSegment() returns TooltipSegment
+		return basicSegment
+
+	/* Set/Add segments */
+
+	function setBasicTemplate(string val)
+		basicSegment.template = val
+
+	function setBasicSegment(string action, string name, string hotkey)
+		basicSegment
+		..addField("action", action)
+		..addField("name", name)
+		..addField("hotkey", hotkey)
+
+	function addSegment(string field, string value) returns TooltipSegment
+		TooltipSegment segment = TooltipSegment.NULL
+		if value != ""
+			segment = new TooltipSegment(this)
+				..addField("field", field)
+				..addField("value", value)
+			segments.add(segment)
+		return segment
+
+	function addLvlSegment(string field, LinkedList<string> values) returns TooltipSegment
+		TooltipSegment segment = TooltipSegment.NULL
+		if not values.isEmpty()
+			segment = new TooltipSegment(this)
+				..addField("field", field)
+				..addField("value", values, true)
+			segments.add(segment)
+		return segment
+
+	function addSegment(string field, LinkedList<string> values) returns TooltipSegment
+		TooltipSegment segment = TooltipSegment.NULL
+		if not values.isEmpty()
+			segment = new TooltipSegment(this)
+				..addField("field", field)
+				..addField("value", values, false)
+			segments.add(segment)
+		return segment
+
+	function addLvlSegment(string field, StringLevelClosure cl) returns TooltipSegment
+		TooltipSegment segment = TooltipSegment.NULL
+		if lvls > 0
+			let values = new LinkedList<string>
+			for lvl = 1 to lvls
+				values.add(cl.run(lvl))
+			segment = addLvlSegment(field, values)
+		return segment
+
+	function addLvlSegment(string field, IntLevelClosure cl) returns TooltipSegment
+		TooltipSegment segment = TooltipSegment.NULL
+		if lvls > 0
+			let values = new LinkedList<string>
+			for lvl = 1 to lvls
+				values.add(cl.run(lvl).toString())
+			segment = addLvlSegment(field, values)
+		return segment
+
+	function addLvlSegment(string field, RealLevelClosure cl, int roundTo) returns TooltipSegment
+		TooltipSegment segment = TooltipSegment.NULL
+		if lvls > 0
+			let values = new LinkedList<string>
+			for lvl = 1 to lvls
+				values.add(cl.run(lvl).toString(roundTo))
+			segment = addLvlSegment(field, values)
+		return segment
+
+	function addLvlSegment(string field, BooleanLevelClosure cl) returns TooltipSegment
+		TooltipSegment segment = TooltipSegment.NULL
+		if lvls > 0
+			let values = new LinkedList<string>
+			for lvl = 1 to lvls
+				values.add(cl.run(lvl).toString())
+			segment = addLvlSegment(field, values)
+		return segment
+
+	/* Render */
+
+	function renderBasic() returns string
+		return renderBasic(1)
+
+	function renderBasic(int lvl) returns string
+		return basicSegment.render(lvl).reduce()
+
+	function renderExtended() returns string
+		return renderExtended(1)
+	
+	function renderExtended(int lvl) returns string
+		var retVal = ""
+		bool first = true
+		for segment in segments
+			if first 
+				retVal += segment.render(lvl)
+				first = false
+			else
+				retVal += "|n" + segment.render(lvl)
+		return retVal
+
+@Test
+function test()
+	let tip = new Tooltip(5)
+	tip.setBasicSegment("Buy", "Ghoul", "H")
+	tip.addSegment("Damage", new LinkedList<string>..add("3")..add("5"))
+	tip.addSegment("Armor", "3")
+	tip.addLvlSegment("Mana Cost", (int lvl) -> lvl * 5.45, 2)
+	tip.addLvlSegment("Is even", (int lvl) -> lvl mod 2 > 0)
+	print(tip.renderBasic(1))
+	print(tip.renderExtended(1))
+
+public function AbilityDefinition.renderTooltipNormal(Tooltip tooltip)
+	this.presetTooltipNormal((int lvl) -> tooltip.renderBasic(lvl))
+	this.presetTooltipNormalExtended((int lvl) -> tooltip.renderExtended(lvl))
+
+public function AbilityDefinition.renderTooltipLearn(Tooltip tooltip)
+	this.presetTooltipLearn((int lvl) -> tooltip.renderBasic(lvl))
+	this.presetTooltipLearnExtended((int lvl) -> tooltip.renderExtended(lvl))
+
+public function AbilityDefinition.renderTooltipTurnOff(Tooltip tooltip)
+	this.presetTooltipTurnOff((int lvl) -> tooltip.renderBasic(lvl))
+	this.presetTooltipTurnOffExtended((int lvl) -> tooltip.renderExtended(lvl))
+
+public function UnitOrBuildingOrHeroDefinition.renderTooltip(Tooltip tooltip)
+	this.setTooltipBasic(tooltip.renderBasic())
+	this.setTooltipExtended(tooltip.renderExtended())
+
+public function ItemDefinition.renderTooltip(Tooltip tooltip)
+	this.setTooltipBasic(tooltip.renderBasic())
+	this.setTooltipExtended(tooltip.renderExtended())
+
+function string.cleanTemplate() returns string
+	var retVal = ""
+	let lastId = this.length()
+	var start = 0
+	for i = 0 to lastId
+		var char = this.charAt(i)
+		if char == "{" or i == lastId
+			retVal += this.substring(start, i)
+		else if char == "}"
+			start = i + 1	
+	return retVal
