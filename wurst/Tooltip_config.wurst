@@ -1,0 +1,18 @@
+package Tooltip_config
+import Tooltip
+
+/* This is an example configuration package for Tooltip.wurst, to use this just copy it to your project and edit it */
+
+@config public constant TOOLTIP_DEFAULT_TEMPLATE = "{field}|n    {value}"
+@config public constant TOOLTIP_DEFAULT_BASIC_TEMPLATE = "{hotkey} {action} {name} {lvl}"
+@config public constant TOOLTIP_DEFAULT_STYLE = new TooltipStyle
+	..put("action", "|cffAAAAAA{action}|r")
+	..put("name", "|cffFFFFDD{name}|r")
+	..put("hotkey", "[|cffFFDD00{hotkey}|r]")
+	..put("lvl", "[|cffFFDD00Level {lvl}|r]")
+	..put("field", "|cff0080DF{field}|r")
+	..put("value", "{value}")
+	..put("value[Sep]", ", ")
+	..put("value[LvlSep]", "/")                                                                                                      
+	..put("value[Emphasize]", "|cffFFFFDD{value}")
+	..put("value[Deemphasize]", "|cff777777{value}|r")
